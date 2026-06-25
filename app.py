@@ -25,7 +25,7 @@ from config import (
     ANO_BASE_INDICE, fmt_usd, fmt_pct,
 )
 from data_loader import (
-    load_uf_data, load_secao_data,
+    load_uf_data, load_secao_data, load_detailed_data,
     compute_aggregates, compute_secao_aggregates,
     compute_index_base100, compute_growth_rates,
     get_top_secoes, get_uf_ranking, get_top_secoes_evolucao,
@@ -56,12 +56,14 @@ def load_all_data():
     """Carrega e processa todos os dados necessários."""
     df_uf = load_uf_data()
     df_secao = load_secao_data()
+    df_detalhado = load_detailed_data()
     agg = compute_aggregates(df_uf)
     secao_agg = compute_secao_aggregates(df_secao)
-    return df_uf, df_secao, agg, secao_agg
+    return df_uf, df_secao, df_detalhado, agg, secao_agg
 
 
-df_uf, df_secao, agg_total, secao_agg = load_all_data()
+df_uf, df_secao, df_detalhado, agg_total, secao_agg = load_all_data()
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -606,195 +608,320 @@ def render_aba4():
 
     st.markdown(
         '<div class="hero-header animate-in">'
-        '<h1>\U0001f3ed Produtos e Estrutura Comercial</h1>'
-        '<p>Perfil da pauta comercial bilateral \u2014 Assimetria e complementaridade '
-        'econ\u00f4mica (2015\u20132025)</p></div>',
+        '<h1>🏭 Produtos e Estrutura Comercial</h1>'
+        '<p>Perfil da pauta comercial bilateral através de classificações por destino econômico, setor industrial e produtos (2015–2025)</p></div>',
         unsafe_allow_html=True,
     )
 
-    # ── Seção de Exportações ──
-    st.markdown(
-        '<div class="section-header">\U0001f4e6 Exporta\u00e7\u00f5es Brasileiras para os Pa\u00edses Baixos</div>',
-        unsafe_allow_html=True,
-    )
+    # Filtrar dados para o período do presente (2015-2025)
+    df_pres = df_detalhado[(df_detalhado["Ano"] >= 2015) & (df_detalhado["Ano"] <= 2025)].copy()
 
-    col_exp1, col_exp2 = st.columns([1, 1])
+    # Criar sub-abas
+    sub_tab_cgce, sub_tab_isic, sub_tab_cuci = st.tabs([
+        "📂 Grandes Categorias Econômicas (CGCE)",
+        "🏭 Setores Industriais (ISIC)",
+        "📦 Detalhamento por Produtos (CUCI)"
+    ])
 
-    top_exp = get_top_secoes(secao_agg, PERIODO_PRESENTE, "Exportacao", top_n=10)
-
-    with col_exp1:
-        st.markdown("##### Top 10 Categorias Exportadas (Acumulado 2015\u20132025)")
-        top_exp_display = top_exp.copy()
-        top_exp_display["Label"] = top_exp_display["DescricaoSecao"].apply(
-            lambda x: x[:55] + "\u2026" if len(str(x)) > 55 else x
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # SUB-ABA 1: CGCE
+    # ═══════════════════════════════════════════════════════════════════════════════
+    with sub_tab_cgce:
+        st.markdown(
+            "### 📂 Grandes Categorias Econômicas (CGCE Nível 1)\n"
+            "Esta análise agrupa os produtos de acordo com seu **destino econômico** (Bens Intermediários, Bens de Capital, Bens de Consumo, Combustíveis)."
         )
-        fig_exp_bar = go.Figure()
-        fig_exp_bar.add_trace(go.Bar(
-            y=top_exp_display["Label"], x=top_exp_display["Exportacao"],
-            orientation="h",
-            marker=dict(
-                color=top_exp_display["Exportacao"],
-                colorscale=[[0, BLUE_LIGHT], [1, BLUE]],
-            ),
-            text=[fmt_usd(v) for v in top_exp_display["Exportacao"]],
-            textposition="auto", textfont=dict(size=9),
-            hovertemplate="<b>%{y}</b><br>Exporta\u00e7\u00e3o: %{text}<extra></extra>",
-        ))
-        fig_exp_bar.update_layout(
-            yaxis=dict(categoryorder="total ascending"),
-            height=450, margin=dict(l=10),
-            xaxis=dict(tickformat=",.0f"),
+
+        col_cgce_exp, col_cgce_imp = st.columns(2)
+
+        # Agregações CGCE
+        df_cgce_exp = df_pres[df_pres["Fluxo"] == "Exportação"].groupby("Descrição CGCE Nível 1")["Valor US$ FOB"].sum().reset_index()
+        df_cgce_imp = df_pres[df_pres["Fluxo"] == "Importação"].groupby("Descrição CGCE Nível 1")["Valor US$ FOB"].sum().reset_index()
+
+        with col_cgce_exp:
+            st.markdown("##### Estrutura de Exportação (Acumulado 2015-2025)")
+            fig_cgce_exp = px.treemap(
+                df_cgce_exp, path=["Descrição CGCE Nível 1"], values="Valor US$ FOB",
+                color="Valor US$ FOB",
+                color_continuous_scale=[[0, NAVY_LIGHT], [0.5, BLUE], [1, BLUE_LIGHT]],
+            )
+            fig_cgce_exp.update_layout(height=350, margin=dict(l=10, r=10, t=10, b=10))
+            fig_cgce_exp.update_traces(
+                textinfo="label+percent root",
+                hovertemplate="<b>%{label}</b><br>Valor: US$ %{value:,.0f}<br>"
+                              "Participação: %{percentRoot:.1%}<extra></extra>",
+            )
+            show_chart(fig_cgce_exp)
+
+        with col_cgce_imp:
+            st.markdown("##### Estrutura de Importação (Acumulado 2015-2025)")
+            fig_cgce_imp = px.treemap(
+                df_cgce_imp, path=["Descrição CGCE Nível 1"], values="Valor US$ FOB",
+                color="Valor US$ FOB",
+                color_continuous_scale=[[0, NAVY_LIGHT], [0.5, ORANGE], [1, ORANGE_LIGHT]],
+            )
+            fig_cgce_imp.update_layout(height=350, margin=dict(l=10, r=10, t=10, b=10))
+            fig_cgce_imp.update_traces(
+                textinfo="label+percent root",
+                hovertemplate="<b>%{label}</b><br>Valor: US$ %{value:,.0f}<br>"
+                              "Participação: %{percentRoot:.1%}<extra></extra>",
+            )
+            show_chart(fig_cgce_imp)
+
+        st.markdown("##### Evolução Anual da Estrutura CGCE Nível 1")
+        # Stacked bar charts por ano
+        df_cgce_yr = df_pres.groupby(["Ano", "Fluxo", "Descrição CGCE Nível 1"])["Valor US$ FOB"].sum().reset_index()
+        
+        col_yr_exp, col_yr_imp = st.columns(2)
+        with col_yr_exp:
+            st.markdown("**Evolução das Exportações (USD)**")
+            fig_yr_exp = px.bar(
+                df_cgce_yr[df_cgce_yr["Fluxo"] == "Exportação"],
+                x="Ano", y="Valor US$ FOB", color="Descrição CGCE Nível 1",
+                color_discrete_sequence=COLOR_SEQUENCE,
+                barmode="stack"
+            )
+            fig_yr_exp.update_layout(
+                height=350, margin=dict(l=10, r=10, t=10, b=10),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.4, font=dict(size=8), title=None)
+            )
+            show_chart(fig_yr_exp)
+            
+        with col_yr_imp:
+            st.markdown("**Evolução das Importações (USD)**")
+            fig_yr_imp = px.bar(
+                df_cgce_yr[df_cgce_yr["Fluxo"] == "Importação"],
+                x="Ano", y="Valor US$ FOB", color="Descrição CGCE Nível 1",
+                color_discrete_sequence=[ORANGE, BLUE, GREEN, GOLD, RED_LIGHT],
+                barmode="stack"
+            )
+            fig_yr_imp.update_layout(
+                height=350, margin=dict(l=10, r=10, t=10, b=10),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.4, font=dict(size=8), title=None)
+            )
+            show_chart(fig_yr_imp)
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # SUB-ABA 2: ISIC
+    # ═══════════════════════════════════════════════════════════════════════════════
+    with sub_tab_isic:
+        st.markdown(
+            "### 🏭 Setores Industriais (ISIC Nível 1 & Divisões)\n"
+            "A classificação ISIC (Classificação Industrial Internacional Uniforme) mapeia as trocas comerciais de acordo com as **atividades industriais originárias**."
         )
-        show_chart(fig_exp_bar)
 
-    with col_exp2:
-        st.markdown("##### Treemap da Pauta Exportadora")
-        top_exp_tree = top_exp.copy()
-        top_exp_tree["Label_tree"] = top_exp_tree["DescricaoSecao"].apply(
-            lambda x: x[:40] + "\u2026" if len(str(x)) > 40 else x
-        )
-        fig_exp_tree = px.treemap(
-            top_exp_tree, path=["Label_tree"], values="Exportacao",
-            color="Exportacao",
-            color_continuous_scale=[[0, NAVY_LIGHT], [0.5, BLUE], [1, BLUE_LIGHT]],
-        )
-        fig_exp_tree.update_layout(height=450, margin=dict(l=10, r=10, t=30, b=10))
-        fig_exp_tree.update_traces(
-            textinfo="label+percent root",
-            hovertemplate="<b>%{label}</b><br>Valor: US$ %{value:,.0f}<br>"
-                          "Participa\u00e7\u00e3o: %{percentRoot:.1%}<extra></extra>",
-        )
-        show_chart(fig_exp_tree)
+        col_isic_exp, col_isic_imp = st.columns(2)
 
-    st.markdown("---")
+        df_isic_exp = df_pres[df_pres["Fluxo"] == "Exportação"].groupby("Descrição ISIC Seção")["Valor US$ FOB"].sum().reset_index()
+        df_isic_imp = df_pres[df_pres["Fluxo"] == "Importação"].groupby("Descrição ISIC Seção")["Valor US$ FOB"].sum().reset_index()
 
-    # ── Seção de Importações ──
-    st.markdown(
-        '<div class="section-header">\U0001f4e5 Importa\u00e7\u00f5es Brasileiras dos Pa\u00edses Baixos</div>',
-        unsafe_allow_html=True,
-    )
+        with col_isic_exp:
+            st.markdown("##### Setores Exportados (Acumulado 2015-2025)")
+            fig_donut_exp = go.Figure(data=[go.Pie(
+                labels=df_isic_exp["Descrição ISIC Seção"],
+                values=df_isic_exp["Valor US$ FOB"],
+                hole=0.4,
+                marker=dict(colors=[BLUE, GREEN, ORANGE, GOLD]),
+                hovertemplate="<b>%{label}</b><br>Valor: US$ %{value:,.0f}<br>Percentual: %{percent}<extra></extra>"
+            )])
+            fig_donut_exp.update_layout(height=350, margin=dict(l=10, r=10, t=20, b=10), legend=dict(orientation="h", yanchor="bottom", y=-0.2))
+            show_chart(fig_donut_exp)
 
-    col_imp1, col_imp2 = st.columns([1, 1])
+        with col_isic_imp:
+            st.markdown("##### Setores Importados (Acumulado 2015-2025)")
+            fig_donut_imp = go.Figure(data=[go.Pie(
+                labels=df_isic_imp["Descrição ISIC Seção"],
+                values=df_isic_imp["Valor US$ FOB"],
+                hole=0.4,
+                marker=dict(colors=[ORANGE, BLUE, GREEN, GOLD]),
+                hovertemplate="<b>%{label}</b><br>Valor: US$ %{value:,.0f}<br>Percentual: %{percent}<extra></extra>"
+            )])
+            fig_donut_imp.update_layout(height=350, margin=dict(l=10, r=10, t=20, b=10), legend=dict(orientation="h", yanchor="bottom", y=-0.2))
+            show_chart(fig_donut_imp)
 
-    top_imp = get_top_secoes(secao_agg, PERIODO_PRESENTE, "Importacao", top_n=10)
+        st.markdown("---")
+        st.markdown("##### Top 10 Divisões Industriais (ISIC Divisão)")
+        
+        col_div_exp, col_div_imp = st.columns(2)
+        
+        # Agregações de Divisões ISIC
+        df_isic_div_exp = df_pres[df_pres["Fluxo"] == "Exportação"].groupby("Descrição ISIC Divisão")["Valor US$ FOB"].sum().reset_index()
+        top_isic_div_exp = df_isic_div_exp.sort_values("Valor US$ FOB", ascending=False).head(10)
+        
+        df_isic_div_imp = df_pres[df_pres["Fluxo"] == "Importação"].groupby("Descrição ISIC Divisão")["Valor US$ FOB"].sum().reset_index()
+        top_isic_div_imp = df_isic_div_imp.sort_values("Valor US$ FOB", ascending=False).head(10)
 
-    with col_imp1:
-        st.markdown("##### Top 10 Categorias Importadas (Acumulado 2015\u20132025)")
-        top_imp_display = top_imp.copy()
-        top_imp_display["Label"] = top_imp_display["DescricaoSecao"].apply(
-            lambda x: x[:55] + "\u2026" if len(str(x)) > 55 else x
-        )
-        fig_imp_bar = go.Figure()
-        fig_imp_bar.add_trace(go.Bar(
-            y=top_imp_display["Label"], x=top_imp_display["Importacao"],
-            orientation="h",
-            marker=dict(
-                color=top_imp_display["Importacao"],
-                colorscale=[[0, ORANGE_LIGHT], [1, ORANGE]],
-            ),
-            text=[fmt_usd(v) for v in top_imp_display["Importacao"]],
-            textposition="auto", textfont=dict(size=9),
-            hovertemplate="<b>%{y}</b><br>Importa\u00e7\u00e3o: %{text}<extra></extra>",
-        ))
-        fig_imp_bar.update_layout(
-            yaxis=dict(categoryorder="total ascending"),
-            height=450, margin=dict(l=10),
-            xaxis=dict(tickformat=",.0f"),
-        )
-        show_chart(fig_imp_bar)
-
-    with col_imp2:
-        st.markdown("##### Treemap da Pauta Importadora")
-        top_imp_tree = top_imp.copy()
-        top_imp_tree["Label_tree"] = top_imp_tree["DescricaoSecao"].apply(
-            lambda x: x[:40] + "\u2026" if len(str(x)) > 40 else x
-        )
-        fig_imp_tree = px.treemap(
-            top_imp_tree, path=["Label_tree"], values="Importacao",
-            color="Importacao",
-            color_continuous_scale=[[0, NAVY_LIGHT], [0.5, ORANGE], [1, ORANGE_LIGHT]],
-        )
-        fig_imp_tree.update_layout(height=450, margin=dict(l=10, r=10, t=30, b=10))
-        fig_imp_tree.update_traces(
-            textinfo="label+percent root",
-            hovertemplate="<b>%{label}</b><br>Valor: US$ %{value:,.0f}<br>"
-                          "Participa\u00e7\u00e3o: %{percentRoot:.1%}<extra></extra>",
-        )
-        show_chart(fig_imp_tree)
-
-    st.markdown("---")
-
-    # ── Evolução Temporal do Top 3 ──
-    st.markdown(
-        '<div class="section-header">\U0001f4c8 Evolu\u00e7\u00e3o Temporal do Top 3 de cada Pauta</div>',
-        unsafe_allow_html=True,
-    )
-
-    col_ev1, col_ev2 = st.columns([1, 1])
-
-    with col_ev1:
-        st.markdown("##### Top 3 Categorias Exportadas \u2014 Evolu\u00e7\u00e3o Anual")
-        evo_exp = get_top_secoes_evolucao(secao_agg, PERIODO_PRESENTE, "Exportacao", 3)
-        fig_evo_exp = go.Figure()
-        for i, (_, grp) in enumerate(evo_exp.groupby("CodigoSecao")):
-            label = grp["DescricaoSecao"].iloc[0]
-            label_short = label[:45] + "\u2026" if len(str(label)) > 45 else label
-            fig_evo_exp.add_trace(go.Scatter(
-                x=grp["Ano"], y=grp["Exportacao"],
-                mode="lines+markers", name=label_short,
-                line=dict(width=2.5, color=COLOR_SEQUENCE[i]),
-                marker=dict(size=6),
-                hovertemplate=f"<b>{label_short}</b><br>"
-                              "Ano: %{x}<br>Exporta\u00e7\u00e3o: US$ %{y:,.0f}<extra></extra>",
+        with col_div_exp:
+            st.markdown("**Top 10 Divisões Exportadas**")
+            top_isic_div_exp["Label"] = top_isic_div_exp["Descrição ISIC Divisão"].apply(
+                lambda x: x[:45] + "..." if len(str(x)) > 45 else x
+            )
+            fig_isic_bar_exp = go.Figure()
+            fig_isic_bar_exp.add_trace(go.Bar(
+                y=top_isic_div_exp["Label"], x=top_isic_div_exp["Valor US$ FOB"],
+                orientation="h",
+                marker=dict(
+                    color=top_isic_div_exp["Valor US$ FOB"],
+                    colorscale=[[0, BLUE_LIGHT], [1, BLUE]],
+                ),
+                text=[fmt_usd(v) for v in top_isic_div_exp["Valor US$ FOB"]],
+                textposition="auto", textfont=dict(size=9),
+                hovertemplate="<b>%{y}</b><br>Exportação: %{text}<extra></extra>",
             ))
-        fig_evo_exp.update_layout(
-            height=420, xaxis=dict(dtick=1),
-            yaxis=dict(tickformat=",.0f"),
-            legend=dict(orientation="h", yanchor="bottom", y=-0.35, font=dict(size=9)),
-        )
-        show_chart(fig_evo_exp)
+            fig_isic_bar_exp.update_layout(
+                yaxis=dict(categoryorder="total ascending"),
+                height=400, margin=dict(l=10, t=10, b=10),
+                xaxis=dict(tickformat=",.0f"),
+            )
+            show_chart(fig_isic_bar_exp)
 
-    with col_ev2:
-        st.markdown("##### Top 3 Categorias Importadas \u2014 Evolu\u00e7\u00e3o Anual")
-        evo_imp = get_top_secoes_evolucao(secao_agg, PERIODO_PRESENTE, "Importacao", 3)
-        fig_evo_imp = go.Figure()
-        for i, (_, grp) in enumerate(evo_imp.groupby("CodigoSecao")):
-            label = grp["DescricaoSecao"].iloc[0]
-            label_short = label[:45] + "\u2026" if len(str(label)) > 45 else label
-            fig_evo_imp.add_trace(go.Scatter(
-                x=grp["Ano"], y=grp["Importacao"],
-                mode="lines+markers", name=label_short,
-                line=dict(width=2.5, color=COLOR_SEQUENCE[i + 3]),
-                marker=dict(size=6),
-                hovertemplate=f"<b>{label_short}</b><br>"
-                              "Ano: %{x}<br>Importa\u00e7\u00e3o: US$ %{y:,.0f}<extra></extra>",
+        with col_div_imp:
+            st.markdown("**Top 10 Divisões Importadas**")
+            top_isic_div_imp["Label"] = top_isic_div_imp["Descrição ISIC Divisão"].apply(
+                lambda x: x[:45] + "..." if len(str(x)) > 45 else x
+            )
+            fig_isic_bar_imp = go.Figure()
+            fig_isic_bar_imp.add_trace(go.Bar(
+                y=top_isic_div_imp["Label"], x=top_isic_div_imp["Valor US$ FOB"],
+                orientation="h",
+                marker=dict(
+                    color=top_isic_div_imp["Valor US$ FOB"],
+                    colorscale=[[0, ORANGE_LIGHT], [1, ORANGE]],
+                ),
+                text=[fmt_usd(v) for v in top_isic_div_imp["Valor US$ FOB"]],
+                textposition="auto", textfont=dict(size=9),
+                hovertemplate="<b>%{y}</b><br>Importação: %{text}<extra></extra>",
             ))
-        fig_evo_imp.update_layout(
-            height=420, xaxis=dict(dtick=1),
-            yaxis=dict(tickformat=",.0f"),
-            legend=dict(orientation="h", yanchor="bottom", y=-0.35, font=dict(size=9)),
+            fig_isic_bar_imp.update_layout(
+                yaxis=dict(categoryorder="total ascending"),
+                height=400, margin=dict(l=10, t=10, b=10),
+                xaxis=dict(tickformat=",.0f"),
+            )
+            show_chart(fig_isic_bar_imp)
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # SUB-ABA 3: CUCI E DETALHAMENTO DE PRODUTO
+    # ═══════════════════════════════════════════════════════════════════════════════
+    with sub_tab_cuci:
+        st.markdown(
+            "### 📦 Classificação Uniforme para o Comércio Internacional (CUCI Divisão)\n"
+            "A classificação CUCI agrupa os produtos com base em seu **tipo e nível de processamento**, oferecendo uma visualização detalhada da pauta comercial."
         )
-        show_chart(fig_evo_imp)
+
+        col_cuci_exp, col_cuci_imp = st.columns(2)
+
+        df_cuci_div_exp = df_pres[df_pres["Fluxo"] == "Exportação"].groupby("Descrição CUCI Divisão")["Valor US$ FOB"].sum().reset_index()
+        top_cuci_div_exp = df_cuci_div_exp.sort_values("Valor US$ FOB", ascending=False).head(10)
+
+        df_cuci_div_imp = df_pres[df_pres["Fluxo"] == "Importação"].groupby("Descrição CUCI Divisão")["Valor US$ FOB"].sum().reset_index()
+        top_cuci_div_imp = df_cuci_div_imp.sort_values("Valor US$ FOB", ascending=False).head(10)
+
+        with col_cuci_exp:
+            st.markdown("##### Top 10 Produtos Exportados (CUCI Divisão)")
+            top_cuci_div_exp["Label"] = top_cuci_div_exp["Descrição CUCI Divisão"].apply(
+                lambda x: x[:45] + "..." if len(str(x)) > 45 else x
+            )
+            fig_cuci_bar_exp = go.Figure()
+            fig_cuci_bar_exp.add_trace(go.Bar(
+                y=top_cuci_div_exp["Label"], x=top_cuci_div_exp["Valor US$ FOB"],
+                orientation="h",
+                marker=dict(
+                    color=top_cuci_div_exp["Valor US$ FOB"],
+                    colorscale=[[0, BLUE_LIGHT], [1, BLUE]],
+                ),
+                text=[fmt_usd(v) for v in top_cuci_div_exp["Valor US$ FOB"]],
+                textposition="auto", textfont=dict(size=9),
+                hovertemplate="<b>%{y}</b><br>Exportação: %{text}<extra></extra>",
+            ))
+            fig_cuci_bar_exp.update_layout(
+                yaxis=dict(categoryorder="total ascending"),
+                height=400, margin=dict(l=10, t=10, b=10),
+                xaxis=dict(tickformat=",.0f"),
+            )
+            show_chart(fig_cuci_bar_exp)
+
+        with col_cuci_imp:
+            st.markdown("##### Top 10 Produtos Importados (CUCI Divisão)")
+            top_cuci_div_imp["Label"] = top_cuci_div_imp["Descrição CUCI Divisão"].apply(
+                lambda x: x[:45] + "..." if len(str(x)) > 45 else x
+            )
+            fig_cuci_bar_imp = go.Figure()
+            fig_cuci_bar_imp.add_trace(go.Bar(
+                y=top_cuci_div_imp["Label"], x=top_cuci_div_imp["Valor US$ FOB"],
+                orientation="h",
+                marker=dict(
+                    color=top_cuci_div_imp["Valor US$ FOB"],
+                    colorscale=[[0, ORANGE_LIGHT], [1, ORANGE]],
+                ),
+                text=[fmt_usd(v) for v in top_cuci_div_imp["Valor US$ FOB"]],
+                textposition="auto", textfont=dict(size=9),
+                hovertemplate="<b>%{y}</b><br>Importação: %{text}<extra></extra>",
+            ))
+            fig_cuci_bar_imp.update_layout(
+                yaxis=dict(categoryorder="total ascending"),
+                height=400, margin=dict(l=10, t=10, b=10),
+                xaxis=dict(tickformat=",.0f"),
+            )
+            show_chart(fig_cuci_bar_imp)
+
+        st.markdown("---")
+        st.markdown("##### 🔍 Navegador de Produtos (Base Completa de Produtos)")
+        
+        col_filtro1, col_filtro2, col_filtro3 = st.columns([1, 1, 2])
+        with col_filtro1:
+            ano_sel = st.selectbox("Filtrar por Ano:", ["Todos"] + sorted(list(df_pres["Ano"].unique()), reverse=True))
+        with col_filtro2:
+            fluxo_sel = st.selectbox("Filtrar por Fluxo:", ["Todos", "Exportação", "Importação"])
+        with col_filtro3:
+            busca = st.text_input("Buscar por descrição de produto:", "")
+
+        df_table = df_pres.copy()
+        if ano_sel != "Todos":
+            df_table = df_table[df_table["Ano"] == ano_sel]
+        if fluxo_sel != "Todos":
+            df_table = df_table[df_table["Fluxo"] == fluxo_sel]
+        if busca:
+            df_table = df_table[
+                df_table["Descrição CUCI Divisão"].str.contains(busca, case=False, na=False) |
+                df_table["Descrição ISIC Divisão"].str.contains(busca, case=False, na=False)
+            ]
+
+        df_table_grouped = df_table.groupby([
+            "Ano", "Fluxo", "Descrição CGCE Nível 1", "Descrição ISIC Seção", "Descrição CUCI Divisão"
+        ])["Valor US$ FOB"].sum().reset_index()
+        
+        df_table_grouped = df_table_grouped.sort_values(["Ano", "Valor US$ FOB"], ascending=[False, False])
+        
+        df_table_formatted = df_table_grouped.copy()
+        df_table_formatted["Valor US$ FOB"] = df_table_formatted["Valor US$ FOB"].apply(fmt_usd)
+
+        st.dataframe(
+            df_table_formatted,
+            column_config={
+                "Ano": st.column_config.NumberColumn(format="%d"),
+                "Fluxo": "Fluxo Comercial",
+                "Descrição CGCE Nível 1": "Categoria Econômica (CGCE)",
+                "Descrição ISIC Seção": "Setor Industrial (ISIC)",
+                "Descrição CUCI Divisão": "Divisão do Produto (CUCI)",
+                "Valor US$ FOB": "Valor FOB"
+            },
+            width="stretch",
+            height=300
+        )
 
     # ── Texto Analítico ──
     st.markdown("---")
     st.markdown(
         '<div class="highlight-card animate-in">'
         '<div style="font-weight:600;color:#E87722;margin-bottom:0.5rem;font-size:1rem">'
-        '\U0001f4dd An\u00e1lise da Pauta Comercial</div>'
+        '📝 Análise da Estrutura de Produtos e Assimetria Comercial</div>'
         '<div style="font-size:0.9rem;color:#E0E0E0;line-height:1.7">'
-        'A rela\u00e7\u00e3o comercial Brasil\u2013Pa\u00edses Baixos apresenta um perfil de '
-        '<strong>complementaridade assim\u00e9trica</strong>. As <strong>exporta\u00e7\u00f5es brasileiras</strong> '
-        's\u00e3o fortemente concentradas em <strong>commodities agr\u00edcolas e minerais</strong>: '
-        'produtos como soja e derivados, min\u00e9rio de ferro, \u00f3leos brutos de petr\u00f3leo, caf\u00e9, '
-        'carnes e celulose dominam a pauta exportadora, refletindo a voca\u00e7\u00e3o prim\u00e1rio-exportadora '
-        'do Brasil no com\u00e9rcio bilateral.<br><br>'
-        'Em contrapartida, as <strong>importa\u00e7\u00f5es vindas dos Pa\u00edses Baixos</strong> s\u00e3o '
-        'compostas por <strong>produtos de maior valor agregado</strong>: produtos qu\u00edmicos '
-        'e farmac\u00eauticos, combust\u00edveis refinados, fertilizantes, m\u00e1quinas e equipamentos, '
-        'instrumentos de precis\u00e3o e produtos industriais de alto conte\u00fado tecnol\u00f3gico. '
-        'Essa assimetria \u00e9 caracter\u00edstica do perfil de com\u00e9rcio entre economias em '
-        'desenvolvimento e economias avan\u00e7adas.</div></div>',
+        'A estrutura comercial detalhada revela a natureza clássica de um <strong>comércio inter-industrial assimétrico</strong>: '
+        'o Brasil atua essencialmente como fornecedor de matérias-primas e insumos energéticos/alimentares básicos (Agropecuária e Indústria Extrativa), '
+        'enquanto os Países Baixos fornecem bens de alto valor tecnológico, químicos industriais e combustíveis refinados (Indústria de Transformação).<br><br>'
+        'A forte representatividade de <strong>Bens Intermediários (BI)</strong> na pauta exportadora brasileira '
+        '(especialmente farelo de soja, soja em grão e minério de ferro) destaca a inserção do Brasil no início das cadeias globais de valor '
+        'através do hub logístico holandês, enquanto as importações refletem a dependência de insumos modernos (como adubos e fertilizantes) e máquinas de capital (Bens de Capital).</div></div>',
         unsafe_allow_html=True,
     )
 
@@ -802,12 +929,10 @@ def render_aba4():
     st.markdown(
         '<div class="info-box animate-in" style="border-left-color:#FFD700">'
         '<div style="font-weight:600;color:#FFD700;margin-bottom:0.4rem">'
-        '\u2b50 Destaque 2023 \u2014 Dados do Itamaraty</div>'
-        '\u201cEm 2023, segundo dados do Itamaraty, os principais produtos exportados pelo Brasil '
-        'para os Pa\u00edses Baixos foram <strong>\u00f3leos brutos de petr\u00f3leo, farelos de soja e '
-        'min\u00e9rio de ferro</strong>; j\u00e1 as importa\u00e7\u00f5es brasileiras inclu\u00edram '
-        '<strong>\u00f3leos combust\u00edveis, fertilizantes qu\u00edmicos e produtos da ind\u00fastria '
-        'de transforma\u00e7\u00e3o</strong>.\u201d</div>',
+        '⭐ Análise Setorial e Econômica (CGCE & ISIC)</div>'
+        'A classificação por CGCE evidencia que mais de <strong>75% das exportações brasileiras</strong> para os Países Baixos destinam-se a '
+        'Bens Intermediários e Combustíveis. Por outro lado, as importações vindas da Holanda mostram uma distribuição focada em '
+        '<strong>produtos da indústria química, adubos químicos e bens industriais</strong>, atestando a forte complementaridade econômica bilateral.</div>',
         unsafe_allow_html=True,
     )
 

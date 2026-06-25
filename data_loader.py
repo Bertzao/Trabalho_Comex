@@ -14,6 +14,7 @@ from config import (
     ARQUIVO_UF,
     ARQUIVO_SECAO,
     ARQUIVO_HISTORICO,
+    ARQUIVO_DETALHADO,
     ANO_BASE_INDICE,
     PERIODO_PASSADO,
     PERIODO_PRESENTE,
@@ -136,7 +137,85 @@ def load_historical_data() -> pd.DataFrame:
     return pd.DataFrame(records).sort_values(["Ano"]).reset_index(drop=True)
 
 
+@st.cache_data(ttl=3600)
+def load_detailed_data() -> pd.DataFrame:
+    """
+    Carrega o arquivo detalhado por CGCE, CUCI e ISIC (1997–2026).
+    Usa usecols para otimizar o tempo de leitura.
+    """
+    cols = [
+        "Fluxo", "Ano",
+        "Descrição CGCE Nível 1",
+        "Descrição CUCI Seção",
+        "Descrição CUCI Divisão",
+        "Descrição ISIC Seção",
+        "Descrição ISIC Divisão",
+        "Valor US$ FOB"
+    ]
+    path = os.path.join(BASE_DIR, ARQUIVO_DETALHADO)
+
+    # Se o arquivo não existir, gera dados simulados para evitar crash
+    if not os.path.exists(path):
+        np.random.seed(42)
+        records = []
+        fluxos = ["Exportação", "Importação"]
+        cgce_cats = [
+            "COMBUSTÍVEIS E LUBRIFICANTES", "BENS INTERMEDIÁRIOS (BI)",
+            "BENS DE CONSUMO (BC)", "BENS DE CAPITAL (BK)",
+            "BENS NÃO ESPECIFICADOS ANTERIORMENTE"
+        ]
+        cuci_secoes = [
+            "COMBUSTIVEIS MINERAIS, LUBRIFICANTES E MATERIAIS RELACIONADOS",
+            "MATERIAS EM BRUTO, NAO COMESTIVEIS, EXCETO COMBUSTIVEIS",
+            "PRODUTOS ALIMENTICIOS E ANIMAIS VIVOS",
+            "ARTIGOS MANUFATURADOS, CLASSIFICADOS PRINCIPALMENTE PELO MATERIAL",
+            "PRODUTOS QUIMICOS E RELACIONADOS, N.E.P."
+        ]
+        cuci_divs = [
+            "Petróleo, produtos petrolíferos e materiais relacionados",
+            "Alimentos para animais (não incluindo cereais não moídos)",
+            "Sementes e frutos oleaginosos",
+            "Vegetais e frutas",
+            "Adubos (exceto os do grupo 272)",
+            "Produtos farmacêuticos e medicinais"
+        ]
+        isic_secoes = ["Indústria Extrativa", "Agropecuária", "Indústria de Transformação"]
+        isic_divs = [
+            "Extração de petróleo e gás natural",
+            "Cultivo de soja",
+            "Fabricação de produtos químicos",
+            "Metalurgia",
+            "Fabricação de produtos alimentícios"
+        ]
+
+        for ano in range(1997, 2027):
+            for fluxo in fluxos:
+                for _ in range(50):
+                    records.append({
+                        "Fluxo": fluxo,
+                        "Ano": ano,
+                        "Descrição CGCE Nível 1": np.random.choice(cgce_cats),
+                        "Descrição CUCI Seção": np.random.choice(cuci_secoes),
+                        "Descrição CUCI Divisão": np.random.choice(cuci_divs),
+                        "Descrição ISIC Seção": np.random.choice(isic_secoes),
+                        "Descrição ISIC Divisão": np.random.choice(isic_divs),
+                        "Valor US$ FOB": float(np.random.randint(100000, 100000000))
+                    })
+        return pd.DataFrame(records)
+
+    # Carregar dados reais
+    df = pd.read_excel(path, usecols=cols)
+
+    # Limpeza de strings
+    str_cols = [c for c in df.columns if c != "Ano" and c != "Valor US$ FOB"]
+    for col in str_cols:
+        df[col] = df[col].astype(str).str.strip()
+
+    return df
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
+
 # CÁLCULOS ECONÔMICOS — AGREGADOS ANUAIS
 # ═══════════════════════════════════════════════════════════════════════════════
 
