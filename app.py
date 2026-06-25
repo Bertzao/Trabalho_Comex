@@ -609,7 +609,7 @@ def render_aba4():
     st.markdown(
         '<div class="hero-header animate-in">'
         '<h1>🏭 Produtos e Estrutura Comercial</h1>'
-        '<p>Perfil da pauta comercial bilateral através de classificações por destino econômico, setor industrial e produtos (2015–2025)</p></div>',
+        '<p>Perfil da pauta comercial bilateral através de classificações por destino econômico, setor industrial, produtos e vias logísticas (2015–2025)</p></div>',
         unsafe_allow_html=True,
     )
 
@@ -617,10 +617,11 @@ def render_aba4():
     df_pres = df_detalhado[(df_detalhado["Ano"] >= 2015) & (df_detalhado["Ano"] <= 2025)].copy()
 
     # Criar sub-abas
-    sub_tab_cgce, sub_tab_isic, sub_tab_cuci = st.tabs([
+    sub_tab_cgce, sub_tab_isic, sub_tab_cuci, sub_tab_logistica = st.tabs([
         "📂 Grandes Categorias Econômicas (CGCE)",
         "🏭 Setores Industriais (ISIC)",
-        "📦 Detalhamento por Produtos (CUCI)"
+        "📦 Detalhamento por Produtos (CUCI)",
+        "⚓ Vias de Transporte (Logística)"
     ])
 
     # ═══════════════════════════════════════════════════════════════════════════════
@@ -908,6 +909,115 @@ def render_aba4():
             width="stretch",
             height=300
         )
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # SUB-ABA 4: VIAS DE TRANSPORTE (LOGÍSTICA)
+    # ═══════════════════════════════════════════════════════════════════════════════
+    with sub_tab_logistica:
+        st.markdown(
+            "### ⚓ Vias de Transporte e Logística Comercial (2015–2025)\n"
+            "Analisa os modais de transporte utilizados para escoar as exportações brasileiras e receber as importações bilaterais."
+        )
+
+        col_log_exp, col_log_imp = st.columns(2)
+
+        # Filtrar df_secao para o período do presente
+        df_secao_pres = df_secao[(df_secao["Ano"] >= 2015) & (df_secao["Ano"] <= 2025)].copy()
+
+        # Agregações por Via
+        df_via_exp = df_secao_pres.groupby("Via")["Exportacao"].sum().reset_index()
+        df_via_imp = df_secao_pres.groupby("Via")["Importacao"].sum().reset_index()
+
+        # Agrupar modais de transporte menores (< 1%)
+        total_exp_via = df_via_exp["Exportacao"].sum()
+        df_via_exp["Percent"] = (df_via_exp["Exportacao"] / total_exp_via) * 100
+        df_via_exp_clean = df_via_exp[df_via_exp["Percent"] >= 1.0].copy()
+        outros_exp = df_via_exp[df_via_exp["Percent"] < 1.0]["Exportacao"].sum()
+        if outros_exp > 0:
+            df_via_exp_clean = pd.concat([df_via_exp_clean, pd.DataFrame([{"Via": "OUTRAS VIAS", "Exportacao": outros_exp, "Percent": (outros_exp/total_exp_via)*100}])])
+
+        total_imp_via = df_via_imp["Importacao"].sum()
+        df_via_imp["Percent"] = (df_via_imp["Importacao"] / total_imp_via) * 100
+        df_via_imp_clean = df_via_imp[df_via_imp["Percent"] >= 1.0].copy()
+        outros_imp = df_via_imp[df_via_imp["Percent"] < 1.0]["Importacao"].sum()
+        if outros_imp > 0:
+            df_via_imp_clean = pd.concat([df_via_imp_clean, pd.DataFrame([{"Via": "OUTRAS VIAS", "Importacao": outros_imp, "Percent": (outros_imp/total_imp_via)*100}])])
+
+        with col_log_exp:
+            st.markdown("##### Modal de Escoamento das Exportações (Acumulado)")
+            fig_via_donut_exp = go.Figure(data=[go.Pie(
+                labels=df_via_exp_clean["Via"],
+                values=df_via_exp_clean["Exportacao"],
+                hole=0.4,
+                marker=dict(colors=[BLUE, BLUE_LIGHT, GREEN, GRAY_MID]),
+                hovertemplate="<b>%{label}</b><br>Valor: US$ %{value:,.0f}<br>Percentual: %{percent}<extra></extra>"
+            )])
+            fig_via_donut_exp.update_layout(height=350, margin=dict(l=10, r=10, t=20, b=10), legend=dict(orientation="h", yanchor="bottom", y=-0.2))
+            show_chart(fig_via_donut_exp)
+
+        with col_log_imp:
+            st.markdown("##### Modal de Entrada das Importações (Acumulado)")
+            fig_via_donut_imp = go.Figure(data=[go.Pie(
+                labels=df_via_imp_clean["Via"],
+                values=df_via_imp_clean["Importacao"],
+                hole=0.4,
+                marker=dict(colors=[ORANGE, ORANGE_LIGHT, GOLD, GRAY_MID]),
+                hovertemplate="<b>%{label}</b><br>Valor: US$ %{value:,.0f}<br>Percentual: %{percent}<extra></extra>"
+            )])
+            fig_via_donut_imp.update_layout(height=350, margin=dict(l=10, r=10, t=20, b=10), legend=dict(orientation="h", yanchor="bottom", y=-0.2))
+            show_chart(fig_via_donut_imp)
+
+        st.markdown("---")
+        
+        st.markdown("##### ✈️ Perfil de Produtos por Modal de Transporte Principal (Aéreo vs Marítimo)")
+        
+        col_sec_air, col_sec_sea = st.columns(2)
+        
+        # Aéreo
+        df_air_sec = df_secao_pres[df_secao_pres["Via"] == "AEREA"].groupby("DescricaoSecao")[["Exportacao", "Importacao"]].sum().reset_index()
+        top_air_imp = df_air_sec.sort_values("Importacao", ascending=False).head(5)
+        top_air_imp["Label"] = top_air_imp["DescricaoSecao"].apply(lambda x: x[:45] + "..." if len(str(x)) > 45 else x)
+        
+        # Marítimo
+        df_sea_sec = df_secao_pres[df_secao_pres["Via"] == "MARITIMA"].groupby("DescricaoSecao")[["Exportacao", "Importacao"]].sum().reset_index()
+        top_sea_exp = df_sea_sec.sort_values("Exportacao", ascending=False).head(5)
+        top_sea_exp["Label"] = top_sea_exp["DescricaoSecao"].apply(lambda x: x[:45] + "..." if len(str(x)) > 45 else x)
+
+        with col_sec_air:
+            st.markdown("**Top 5 Seções NCM Importadas via Aérea (Mais Tecnológico)**")
+            fig_air_bar = go.Figure()
+            fig_air_bar.add_trace(go.Bar(
+                y=top_air_imp["Label"], x=top_air_imp["Importacao"],
+                orientation="h",
+                marker=dict(color=ORANGE),
+                text=[fmt_usd(v) for v in top_air_imp["Importacao"]],
+                textposition="auto", textfont=dict(size=9),
+                hovertemplate="<b>%{y}</b><br>Importação Aérea: %{text}<extra></extra>",
+            ))
+            fig_air_bar.update_layout(
+                yaxis=dict(categoryorder="total ascending"),
+                height=300, margin=dict(l=10, t=10, b=10),
+                xaxis=dict(tickformat=",.0f"),
+            )
+            show_chart(fig_air_bar)
+
+        with col_sec_sea:
+            st.markdown("**Top 5 Seções NCM Exportadas via Marítima (Mais Bulky/Granel)**")
+            fig_sea_bar = go.Figure()
+            fig_sea_bar.add_trace(go.Bar(
+                y=top_sea_exp["Label"], x=top_sea_exp["Exportacao"],
+                orientation="h",
+                marker=dict(color=BLUE),
+                text=[fmt_usd(v) for v in top_sea_exp["Exportacao"]],
+                textposition="auto", textfont=dict(size=9),
+                hovertemplate="<b>%{y}</b><br>Exportação Marítima: %{text}<extra></extra>",
+            ))
+            fig_sea_bar.update_layout(
+                yaxis=dict(categoryorder="total ascending"),
+                height=300, margin=dict(l=10, t=10, b=10),
+                xaxis=dict(tickformat=",.0f"),
+            )
+            show_chart(fig_sea_bar)
 
     # ── Texto Analítico ──
     st.markdown("---")
