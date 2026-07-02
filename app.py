@@ -209,10 +209,8 @@ def render_aba1():
         )
 
     timeline_html = (
-        '<!DOCTYPE html><html><head><style>'
-        'body{background:transparent;margin:0;padding:0;'
-        'font-family:Inter,Segoe UI,sans-serif}'
-        '.tl-wrap{position:relative;padding:20px 0}'
+        '<style>'
+        '.tl-wrap{position:relative;padding:20px 0;margin-top:20px}'
         '.tl-line{position:absolute;left:50%;top:0;bottom:0;width:3px;'
         'background:linear-gradient(180deg,#E87722,#2196F3,#E87722);'
         'transform:translateX(-50%);border-radius:2px}'
@@ -237,12 +235,12 @@ def render_aba1():
         '.tl-desc{font-size:.85rem;color:#B0B8C4;line-height:1.5}'
         '@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}'
         'to{opacity:1;transform:translateY(0)}}'
-        '</style></head><body>'
+        '</style>'
         '<div class="tl-wrap"><div class="tl-line"></div>'
-        f'{items_html}</div></body></html>'
+        f'{items_html}</div>'
     )
 
-    components.html(timeline_html, height=1400, scrolling=False)
+    st.markdown(timeline_html, unsafe_allow_html=True)
 
     # ── Card de destaque final ──
     st.markdown("<br>", unsafe_allow_html=True)
@@ -1664,10 +1662,23 @@ def render_aba5():
         ),
     ))
     fig_heat.update_layout(
-        title="Matriz de Impacto dos Fatores por Cen\u00e1rio Econ\u00f4mico",
+        title="Matriz de Impacto dos Fatores por Cenário Econômico",
         height=420, yaxis=dict(tickfont=dict(size=11)),
     )
     show_chart(fig_heat)
+
+    st.markdown(
+        '<div class="info-box animate-in" style="border-left-color:#AB47BC">'
+        '<div style="font-weight:600;color:#AB47BC;margin-bottom:0.4rem">'
+        '💡 Como esta matriz se conecta com as projeções?</div>'
+        'A matriz acima <strong>não</strong> calcula diretamente os números das projeções, mas fornece '
+        'a <strong>fundamentação qualitativa</strong> que justifica as taxas escolhidas no nosso modelo. '
+        '<br><br>Por exemplo, no Cenário Otimista, o fator "Transição Energética" tem um impacto '
+        '"Muito forte (+3)". É essa premissa geopolítica e econômica que justifica por que configuramos '
+        'o modelo para aplicar uma taxa de crescimento agressiva nas exportações (+10% ao ano) '
+        'sob esse cenário. O heatmap funciona como o "racional" por trás da matemática.</div>',
+        unsafe_allow_html=True,
+    )
 
     # ── Nota metodológica ──
     st.markdown(
