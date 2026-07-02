@@ -15,6 +15,8 @@ from config import (
     ARQUIVO_SECAO,
     ARQUIVO_HISTORICO,
     ARQUIVO_DETALHADO,
+    ARQUIVO_URF,
+    ARQUIVO_SH_DETALHADO,
     ANO_BASE_INDICE,
     PERIODO_PASSADO,
     PERIODO_PRESENTE,
@@ -138,16 +140,67 @@ def load_historical_data() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=3600)
+def load_urf_data() -> pd.DataFrame:
+    """
+    Carrega o arquivo de Exportação/Importação por URF (portos, aeroportos, postos).
+    Fonte: H_EXPORTACAO_E IMPORTACAO_GERAL_1997-01_2026-12_DT20260701.xlsx
+
+    Retorna DataFrame long: [Ano, Via, UF, URF, NomeURF, Exportacao, Importacao]
+    A coluna NomeURF contém apenas o nome limpo (ex: "PORTO DE SANTOS").
+    """
+    path = os.path.join(BASE_DIR, ARQUIVO_URF)
+    df = pd.read_excel(path)
+
+    # Colunas de exportação e importação (padrão: "Exportação - YYYY - Valor US$ FOB")
+    exp_cols = [c for c in df.columns if "Exporta" in c and "Valor" in c]
+    imp_cols = [c for c in df.columns if "Importa" in c and "Valor" in c]
+
+    records = []
+    for _, row in df.iterrows():
+        via = str(row["Via"]).strip()
+        uf = str(row["UF do Produto"]).strip()
+        urf_raw = str(row["URF"]).strip()
+
+        # Extrair nome limpo do URF (ex: "0817800 - PORTO DE SANTOS" → "PORTO DE SANTOS")
+        if " - " in urf_raw:
+            nome_urf = urf_raw.split(" - ", 1)[1].strip()
+        else:
+            nome_urf = urf_raw
+
+        for ec, ic in zip(sorted(exp_cols), sorted(imp_cols)):
+            # Extrair ano do nome da coluna
+            ano = int("".join(filter(str.isdigit, ec.split("-")[1].strip())))
+            exp_val = pd.to_numeric(row[ec], errors="coerce")
+            imp_val = pd.to_numeric(row[ic], errors="coerce")
+            records.append({
+                "Ano": ano,
+                "Via": via,
+                "UF": uf,
+                "URF": urf_raw,
+                "NomeURF": nome_urf,
+                "Exportacao": exp_val if pd.notna(exp_val) else 0,
+                "Importacao": imp_val if pd.notna(imp_val) else 0,
+            })
+
+    return pd.DataFrame(records).sort_values(["Ano", "Via"]).reset_index(drop=True)
+
+
+@st.cache_data(ttl=3600)
 def load_detailed_data() -> pd.DataFrame:
     """
     Carrega o arquivo detalhado por CGCE, CUCI e ISIC (1997–2026).
     Usa usecols para otimizar o tempo de leitura.
     """
+    # ── Colunas carregadas do arquivo detalhado ──
+    # Adicionamos "Descrição CUCI Grupo" e "Descrição CUCI Item" para permitir
+    # drill-down interativo na seção CUCI (ex: Petróleo → Bruto vs Refinado)
     cols = [
         "Fluxo", "Ano",
         "Descrição CGCE Nível 1",
         "Descrição CUCI Seção",
         "Descrição CUCI Divisão",
+        "Descrição CUCI Grupo",
+        "Descrição CUCI Item",
         "Descrição ISIC Seção",
         "Descrição ISIC Divisão",
         "Valor US$ FOB"
@@ -179,6 +232,16 @@ def load_detailed_data() -> pd.DataFrame:
             "Adubos (exceto os do grupo 272)",
             "Produtos farmacêuticos e medicinais"
         ]
+        cuci_grupos = [
+            "Óleos brutos de petróleo", "Produtos refinados de petróleo",
+            "Farelos de soja", "Soja em grão", "Celulose",
+            "Sucos de frutas", "Café não torrado"
+        ]
+        cuci_itens = [
+            "Petróleo bruto", "Gasolina", "Farelo de soja",
+            "Soja mesmo triturada", "Pasta química de madeira",
+            "Suco de laranja", "Café em grão"
+        ]
         isic_secoes = ["Indústria Extrativa", "Agropecuária", "Indústria de Transformação"]
         isic_divs = [
             "Extração de petróleo e gás natural",
@@ -197,6 +260,8 @@ def load_detailed_data() -> pd.DataFrame:
                         "Descrição CGCE Nível 1": np.random.choice(cgce_cats),
                         "Descrição CUCI Seção": np.random.choice(cuci_secoes),
                         "Descrição CUCI Divisão": np.random.choice(cuci_divs),
+                        "Descrição CUCI Grupo": np.random.choice(cuci_grupos),
+                        "Descrição CUCI Item": np.random.choice(cuci_itens),
                         "Descrição ISIC Seção": np.random.choice(isic_secoes),
                         "Descrição ISIC Divisão": np.random.choice(isic_divs),
                         "Valor US$ FOB": float(np.random.randint(100000, 100000000))

@@ -67,6 +67,12 @@ ARQUIVO_SECAO = "H_EXPORTACAO_E IMPORTACAO_GERAL_1997-01_2026-12_DT20260624 (1).
 ARQUIVO_HISTORICO = "H_EXPORTACAO_E IMPORTACAO_DADOS HISTORICOS_1989-01_1996-12_DT20260624.xlsx"
 ARQUIVO_DETALHADO = "V_EXPORTACAO_E IMPORTACAO_GERAL_1997-01_2026-12_DT20260624.xlsx"
 
+# ── Novas planilhas (Julho/2026) ──
+# Planilha com dados de Exportação e Importação por URF (portos, aeroportos, postos de fronteira)
+ARQUIVO_URF = "H_EXPORTACAO_E IMPORTACAO_GERAL_1997-01_2026-12_DT20260701.xlsx"
+# Planilha com detalhamento de produtos por hierarquia SH (SH2, SH4, SH6) + Seção NCM
+ARQUIVO_SH_DETALHADO = "H_EXPORTACAO_GERAL_1997-01_2026-12_DT20260701.xlsx"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FORMATAÇÃO

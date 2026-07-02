@@ -25,7 +25,7 @@ from config import (
     ANO_BASE_INDICE, fmt_usd, fmt_pct,
 )
 from data_loader import (
-    load_uf_data, load_secao_data, load_detailed_data,
+    load_uf_data, load_secao_data, load_detailed_data, load_urf_data,
     compute_aggregates, compute_secao_aggregates,
     compute_index_base100, compute_growth_rates,
     get_top_secoes, get_uf_ranking, get_top_secoes_evolucao,
@@ -57,12 +57,13 @@ def load_all_data():
     df_uf = load_uf_data()
     df_secao = load_secao_data()
     df_detalhado = load_detailed_data()
+    df_urf_portos = load_urf_data()  # Dados de portos/aeroportos (URF)
     agg = compute_aggregates(df_uf)
     secao_agg = compute_secao_aggregates(df_secao)
-    return df_uf, df_secao, df_detalhado, agg, secao_agg
+    return df_uf, df_secao, df_detalhado, df_urf_portos, agg, secao_agg
 
 
-df_uf, df_secao, df_detalhado, agg_total, secao_agg = load_all_data()
+df_uf, df_secao, df_detalhado, df_urf_portos, agg_total, secao_agg = load_all_data()
 
 
 
@@ -801,7 +802,7 @@ def render_aba4():
             show_chart(fig_isic_bar_imp)
 
     # ═══════════════════════════════════════════════════════════════════════════════
-    # SUB-ABA 3: CUCI E DETALHAMENTO DE PRODUTO
+    # SUB-ABA 3: CUCI E DETALHAMENTO DE PRODUTO (com drill-down interativo)
     # ═══════════════════════════════════════════════════════════════════════════════
     with sub_tab_cuci:
         st.markdown(
@@ -809,30 +810,84 @@ def render_aba4():
             "A classificação CUCI agrupa os produtos com base em seu **tipo e nível de processamento**, oferecendo uma visualização detalhada da pauta comercial."
         )
 
+        # ── Texto didático para leigos ──
+        st.markdown(
+            '<div class="info-box animate-in" style="border-left-color:#64B5F6">'
+            '<div style="font-weight:600;color:#64B5F6;margin-bottom:0.4rem">'
+            '💡 O que é a classificação CUCI?</div>'
+            'Imagine que todos os produtos comercializados entre países são organizados em "gavetas" '
+            'de acordo com o que são. Por exemplo, a "gaveta" de <strong>Petróleo</strong> contém '
+            'tanto petróleo bruto (sem processar) quanto derivados refinados (como gasolina e diesel). '
+            'Ao <strong>passar o mouse sobre uma barra</strong> nos gráficos abaixo, você verá os '
+            '<strong>subprodutos mais relevantes</strong> daquela categoria e quanto cada um representa em valor.</div>',
+            unsafe_allow_html=True,
+        )
+
         col_cuci_exp, col_cuci_imp = st.columns(2)
 
-        df_cuci_div_exp = df_pres[df_pres["Fluxo"] == "Exportação"].groupby("Descrição CUCI Divisão")["Valor US$ FOB"].sum().reset_index()
-        top_cuci_div_exp = df_cuci_div_exp.sort_values("Valor US$ FOB", ascending=False).head(10)
+        # ── Preparar dados CUCI com subprodutos para tooltips enriquecidos ──
+        def _build_cuci_bars_with_drilldown(df_fluxo, fluxo_label, cor_base, cor_light):
+            """Constrói dados para gráfico CUCI com tooltips mostrando subprodutos."""
+            df_div = df_fluxo.groupby("Descrição CUCI Divisão")["Valor US$ FOB"].sum().reset_index()
+            top_div = df_div.sort_values("Valor US$ FOB", ascending=False).head(10)
+            total_fluxo = df_div["Valor US$ FOB"].sum()
 
-        df_cuci_div_imp = df_pres[df_pres["Fluxo"] == "Importação"].groupby("Descrição CUCI Divisão")["Valor US$ FOB"].sum().reset_index()
-        top_cuci_div_imp = df_cuci_div_imp.sort_values("Valor US$ FOB", ascending=False).head(10)
+            labels = []
+            hover_texts = []
+            for _, row in top_div.iterrows():
+                divisao = row["Descrição CUCI Divisão"]
+                valor = row["Valor US$ FOB"]
+                pct = (valor / total_fluxo * 100) if total_fluxo > 0 else 0
+
+                label = divisao[:45] + "..." if len(str(divisao)) > 45 else divisao
+                labels.append(label)
+
+                # Buscar top 3 subprodutos (CUCI Grupo) desta Divisão
+                sub = df_fluxo[df_fluxo["Descrição CUCI Divisão"] == divisao]
+                top_grupos = sub.groupby("Descrição CUCI Grupo")["Valor US$ FOB"].sum().reset_index()
+                top_grupos = top_grupos.sort_values("Valor US$ FOB", ascending=False).head(3)
+
+                hover = (
+                    f"<b>📦 {divisao}</b><br>"
+                    f"<br>"
+                    f"💰 Valor total ({fluxo_label}): <b>{fmt_usd(valor)}</b><br>"
+                    f"📊 Representa <b>{pct:.1f}%</b> do total de {fluxo_label.lower()}<br>"
+                    f"<br>"
+                    f"<b>🔍 Principais subprodutos desta categoria:</b><br>"
+                )
+                for j, (_, g_row) in enumerate(top_grupos.iterrows()):
+                    g_nome = str(g_row["Descrição CUCI Grupo"])
+                    g_nome_short = g_nome[:50] + "..." if len(g_nome) > 50 else g_nome
+                    g_val = fmt_usd(g_row["Valor US$ FOB"])
+                    hover += f"  {j+1}. {g_nome_short} — {g_val}<br>"
+
+                hover_texts.append(hover)
+
+            top_div = top_div.copy()
+            top_div["Label"] = labels
+            top_div["HoverText"] = hover_texts
+            return top_div
+
+        df_exp_fluxo = df_pres[df_pres["Fluxo"] == "Exportação"]
+        df_imp_fluxo = df_pres[df_pres["Fluxo"] == "Importação"]
+
+        top_cuci_exp = _build_cuci_bars_with_drilldown(df_exp_fluxo, "Exportações", BLUE, BLUE_LIGHT)
+        top_cuci_imp = _build_cuci_bars_with_drilldown(df_imp_fluxo, "Importações", ORANGE, ORANGE_LIGHT)
 
         with col_cuci_exp:
             st.markdown("##### Top 10 Produtos Exportados (CUCI Divisão)")
-            top_cuci_div_exp["Label"] = top_cuci_div_exp["Descrição CUCI Divisão"].apply(
-                lambda x: x[:45] + "..." if len(str(x)) > 45 else x
-            )
             fig_cuci_bar_exp = go.Figure()
             fig_cuci_bar_exp.add_trace(go.Bar(
-                y=top_cuci_div_exp["Label"], x=top_cuci_div_exp["Valor US$ FOB"],
+                y=top_cuci_exp["Label"], x=top_cuci_exp["Valor US$ FOB"],
                 orientation="h",
                 marker=dict(
-                    color=top_cuci_div_exp["Valor US$ FOB"],
+                    color=top_cuci_exp["Valor US$ FOB"],
                     colorscale=[[0, BLUE_LIGHT], [1, BLUE]],
                 ),
-                text=[fmt_usd(v) for v in top_cuci_div_exp["Valor US$ FOB"]],
+                text=[fmt_usd(v) for v in top_cuci_exp["Valor US$ FOB"]],
                 textposition="auto", textfont=dict(size=9),
-                hovertemplate="<b>%{y}</b><br>Exportação: %{text}<extra></extra>",
+                hovertext=top_cuci_exp["HoverText"].tolist(),
+                hovertemplate="%{hovertext}<extra></extra>",
             ))
             fig_cuci_bar_exp.update_layout(
                 yaxis=dict(categoryorder="total ascending"),
@@ -843,20 +898,18 @@ def render_aba4():
 
         with col_cuci_imp:
             st.markdown("##### Top 10 Produtos Importados (CUCI Divisão)")
-            top_cuci_div_imp["Label"] = top_cuci_div_imp["Descrição CUCI Divisão"].apply(
-                lambda x: x[:45] + "..." if len(str(x)) > 45 else x
-            )
             fig_cuci_bar_imp = go.Figure()
             fig_cuci_bar_imp.add_trace(go.Bar(
-                y=top_cuci_div_imp["Label"], x=top_cuci_div_imp["Valor US$ FOB"],
+                y=top_cuci_imp["Label"], x=top_cuci_imp["Valor US$ FOB"],
                 orientation="h",
                 marker=dict(
-                    color=top_cuci_div_imp["Valor US$ FOB"],
+                    color=top_cuci_imp["Valor US$ FOB"],
                     colorscale=[[0, ORANGE_LIGHT], [1, ORANGE]],
                 ),
-                text=[fmt_usd(v) for v in top_cuci_div_imp["Valor US$ FOB"]],
+                text=[fmt_usd(v) for v in top_cuci_imp["Valor US$ FOB"]],
                 textposition="auto", textfont=dict(size=9),
-                hovertemplate="<b>%{y}</b><br>Importação: %{text}<extra></extra>",
+                hovertext=top_cuci_imp["HoverText"].tolist(),
+                hovertemplate="%{hovertext}<extra></extra>",
             ))
             fig_cuci_bar_imp.update_layout(
                 yaxis=dict(categoryorder="total ascending"),
@@ -865,6 +918,100 @@ def render_aba4():
             )
             show_chart(fig_cuci_bar_imp)
 
+        # ══════════════════════════════════════════════════════════════════════════
+        # DRILL-DOWN INTERATIVO: Detalhamento por Divisão CUCI
+        # ══════════════════════════════════════════════════════════════════════════
+        st.markdown("---")
+        st.markdown(
+            "##### 🔎 Detalhamento Interativo — Explore os subprodutos de cada categoria\n"
+            "Selecione uma categoria de produto abaixo para ver exatamente **o que está dentro dela**. "
+            "Por exemplo, ao selecionar *Petróleo*, você verá se é petróleo **bruto** ou **refinado** e quanto cada tipo representa."
+        )
+
+        all_divs = df_pres.groupby("Descrição CUCI Divisão")["Valor US$ FOB"].sum().reset_index()
+        all_divs = all_divs.sort_values("Valor US$ FOB", ascending=False)
+        divisoes_opcoes = all_divs["Descrição CUCI Divisão"].tolist()
+
+        col_dd_sel, col_dd_fluxo = st.columns([3, 1])
+        with col_dd_sel:
+            divisao_selecionada = st.selectbox(
+                "📦 Selecione uma Divisão CUCI para detalhar:",
+                divisoes_opcoes,
+                index=0,
+                key="cuci_drilldown_select"
+            )
+        with col_dd_fluxo:
+            fluxo_dd = st.radio(
+                "Fluxo:", ["Exportação", "Importação"],
+                horizontal=True,
+                key="cuci_drilldown_fluxo"
+            )
+
+        df_dd = df_pres[
+            (df_pres["Descrição CUCI Divisão"] == divisao_selecionada) &
+            (df_pres["Fluxo"] == fluxo_dd)
+        ]
+
+        if df_dd.empty:
+            st.info(f"⚠️ Não há registros de **{fluxo_dd.lower()}** para a categoria \"{divisao_selecionada}\" no período 2015–2025.")
+        else:
+            df_dd_grupo = df_dd.groupby("Descrição CUCI Grupo")["Valor US$ FOB"].sum().reset_index()
+            df_dd_grupo = df_dd_grupo.sort_values("Valor US$ FOB", ascending=False)
+            total_divisao = df_dd_grupo["Valor US$ FOB"].sum()
+
+            cor_dd = BLUE if fluxo_dd == "Exportação" else ORANGE
+            cor_dd_light = BLUE_LIGHT if fluxo_dd == "Exportação" else ORANGE_LIGHT
+
+            st.markdown(
+                f'<div class="info-box animate-in" style="border-left-color:{cor_dd}">'
+                f'<strong>📦 {divisao_selecionada}</strong><br>'
+                f'Valor total acumulado ({fluxo_dd.lower()}, 2015–2025): <strong>{fmt_usd(total_divisao)}</strong><br>'
+                f'Esta categoria contém <strong>{len(df_dd_grupo)}</strong> subgrupos de produtos diferentes.</div>',
+                unsafe_allow_html=True,
+            )
+
+            df_dd_grupo["Label"] = df_dd_grupo["Descrição CUCI Grupo"].apply(
+                lambda x: x[:55] + "..." if len(str(x)) > 55 else x
+            )
+            df_dd_grupo["Percent"] = (df_dd_grupo["Valor US$ FOB"] / total_divisao * 100)
+
+            hover_dd = []
+            for _, row in df_dd_grupo.iterrows():
+                h = (
+                    f"<b>🔍 {row['Descrição CUCI Grupo']}</b><br>"
+                    f"<br>"
+                    f"💰 Valor: <b>{fmt_usd(row['Valor US$ FOB'])}</b><br>"
+                    f"📊 Peso dentro da categoria: <b>{row['Percent']:.1f}%</b><br>"
+                    f"<br>"
+                    f"<i>Este subproduto faz parte da categoria<br>\"{divisao_selecionada[:50]}\"</i>"
+                )
+                hover_dd.append(h)
+
+            fig_dd = go.Figure()
+            fig_dd.add_trace(go.Bar(
+                y=df_dd_grupo["Label"], x=df_dd_grupo["Valor US$ FOB"],
+                orientation="h",
+                marker=dict(
+                    color=df_dd_grupo["Valor US$ FOB"],
+                    colorscale=[[0, cor_dd_light], [1, cor_dd]],
+                ),
+                text=[f"{fmt_usd(v)} ({p:.1f}%)" for v, p in zip(df_dd_grupo["Valor US$ FOB"], df_dd_grupo["Percent"])],
+                textposition="auto", textfont=dict(size=9),
+                hovertext=hover_dd,
+                hovertemplate="%{hovertext}<extra></extra>",
+            ))
+            fig_dd.update_layout(
+                title=f"Subprodutos de \"{divisao_selecionada[:50]}\" — {fluxo_dd}",
+                yaxis=dict(categoryorder="total ascending"),
+                height=max(300, len(df_dd_grupo) * 35 + 80),
+                margin=dict(l=10, t=40, b=10),
+                xaxis=dict(tickformat=",.0f", title="Valor FOB Acumulado (US$)"),
+            )
+            show_chart(fig_dd)
+
+        # ══════════════════════════════════════════════════════════════════════════
+        # NAVEGADOR DE PRODUTOS (tabela, agora com CUCI Grupo)
+        # ══════════════════════════════════════════════════════════════════════════
         st.markdown("---")
         st.markdown("##### 🔍 Navegador de Produtos (Base Completa de Produtos)")
         
@@ -884,11 +1031,12 @@ def render_aba4():
         if busca:
             df_table = df_table[
                 df_table["Descrição CUCI Divisão"].str.contains(busca, case=False, na=False) |
+                df_table["Descrição CUCI Grupo"].str.contains(busca, case=False, na=False) |
                 df_table["Descrição ISIC Divisão"].str.contains(busca, case=False, na=False)
             ]
 
         df_table_grouped = df_table.groupby([
-            "Ano", "Fluxo", "Descrição CGCE Nível 1", "Descrição ISIC Seção", "Descrição CUCI Divisão"
+            "Ano", "Fluxo", "Descrição CGCE Nível 1", "Descrição CUCI Divisão", "Descrição CUCI Grupo"
         ])["Valor US$ FOB"].sum().reset_index()
         
         df_table_grouped = df_table_grouped.sort_values(["Ano", "Valor US$ FOB"], ascending=[False, False])
@@ -902,16 +1050,18 @@ def render_aba4():
                 "Ano": st.column_config.NumberColumn(format="%d"),
                 "Fluxo": "Fluxo Comercial",
                 "Descrição CGCE Nível 1": "Categoria Econômica (CGCE)",
-                "Descrição ISIC Seção": "Setor Industrial (ISIC)",
-                "Descrição CUCI Divisão": "Divisão do Produto (CUCI)",
+                "Descrição CUCI Divisão": "Categoria do Produto (CUCI)",
+                "Descrição CUCI Grupo": "Subproduto Detalhado (CUCI Grupo)",
                 "Valor US$ FOB": "Valor FOB"
             },
             width="stretch",
-            height=300
+            height=350
         )
 
+
+
     # ═══════════════════════════════════════════════════════════════════════════════
-    # SUB-ABA 4: VIAS DE TRANSPORTE (LOGÍSTICA)
+    # SUB-ABA 4: VIAS DE TRANSPORTE (LOGÍSTICA) — com portos/aeroportos URF
     # ═══════════════════════════════════════════════════════════════════════════════
     with sub_tab_logistica:
         st.markdown(
@@ -919,10 +1069,28 @@ def render_aba4():
             "Analisa os modais de transporte utilizados para escoar as exportações brasileiras e receber as importações bilaterais."
         )
 
+        # ── Texto didático para leigos ──
+        st.markdown(
+            '<div class="info-box animate-in" style="border-left-color:#26C6DA">'
+            '<div style="font-weight:600;color:#26C6DA;margin-bottom:0.4rem">'
+            '💡 O que são modais de transporte no comércio internacional?</div>'
+            'Quando o Brasil exporta soja ou petróleo para os Países Baixos, esses produtos precisam '
+            'ser <strong>transportados fisicamente</strong> até lá. O modo como isso acontece é chamado de '
+            '"modal de transporte". A grande maioria vai por <strong>navio</strong> (via marítima), '
+            'saindo de portos como <strong>Santos (SP)</strong> e <strong>Paranaguá (PR)</strong>. '
+            'Produtos mais leves e de alto valor, como medicamentos e equipamentos eletrônicos, '
+            'geralmente vão por <strong>avião</strong> (via aérea), partindo de aeroportos como '
+            '<strong>Guarulhos (SP)</strong>.</div>',
+            unsafe_allow_html=True,
+        )
+
         col_log_exp, col_log_imp = st.columns(2)
 
         # Filtrar df_secao para o período do presente
         df_secao_pres = df_secao[(df_secao["Ano"] >= 2015) & (df_secao["Ano"] <= 2025)].copy()
+
+        # ── Filtrar dados URF para o período do presente ──
+        df_urf_pres = df_urf_portos[(df_urf_portos["Ano"] >= 2015) & (df_urf_portos["Ano"] <= 2025)].copy()
 
         # Agregações por Via
         df_via_exp = df_secao_pres.groupby("Via")["Exportacao"].sum().reset_index()
@@ -943,6 +1111,51 @@ def render_aba4():
         if outros_imp > 0:
             df_via_imp_clean = pd.concat([df_via_imp_clean, pd.DataFrame([{"Via": "OUTRAS VIAS", "Importacao": outros_imp, "Percent": (outros_imp/total_imp_via)*100}])])
 
+        # ── Construir tooltips enriquecidos para os donuts (com top portos por via) ──
+        def _build_via_hover(via_name, valor, total, tipo_fluxo):
+            """Constrói hover humanizado para gráfico de pizza, incluindo top portos."""
+            pct = (valor / total * 100) if total > 0 else 0
+            fluxo_col = "Exportacao" if tipo_fluxo == "Exportações" else "Importacao"
+
+            # Buscar top 3 portos/aeroportos desta via
+            df_urf_via = df_urf_pres[df_urf_pres["Via"] == via_name]
+            top_portos = df_urf_via.groupby("NomeURF")[fluxo_col].sum().reset_index()
+            top_portos = top_portos.sort_values(fluxo_col, ascending=False).head(3)
+
+            # Mapear nome da via para linguagem leiga
+            via_nomes = {
+                "MARITIMA": "🚢 Via Marítima (navios)",
+                "AEREA": "✈️ Via Aérea (aviões)",
+                "OUTRAS VIAS": "📦 Outras vias (rodoviária, postal, etc.)",
+            }
+            via_label = via_nomes.get(via_name, f"📦 {via_name}")
+
+            hover = (
+                f"<b>{via_label}</b><br>"
+                f"<br>"
+                f"💰 Valor ({tipo_fluxo}): <b>{fmt_usd(valor)}</b><br>"
+                f"📊 Participação: <b>{pct:.1f}%</b> do total<br>"
+            )
+
+            if not top_portos.empty:
+                hover += f"<br><b>🏗️ Principais pontos de embarque/desembarque:</b><br>"
+                for j, (_, p_row) in enumerate(top_portos.iterrows()):
+                    p_nome = str(p_row["NomeURF"])
+                    p_val = fmt_usd(p_row[fluxo_col])
+                    hover += f"  {j+1}. {p_nome} — {p_val}<br>"
+
+            return hover
+
+        # Hover enriquecido para exportações
+        exp_hovers = []
+        for _, row in df_via_exp_clean.iterrows():
+            exp_hovers.append(_build_via_hover(row["Via"], row["Exportacao"], total_exp_via, "Exportações"))
+
+        # Hover enriquecido para importações
+        imp_hovers = []
+        for _, row in df_via_imp_clean.iterrows():
+            imp_hovers.append(_build_via_hover(row["Via"], row["Importacao"], total_imp_via, "Importações"))
+
         with col_log_exp:
             st.markdown("##### Modal de Escoamento das Exportações (Acumulado)")
             fig_via_donut_exp = go.Figure(data=[go.Pie(
@@ -950,7 +1163,9 @@ def render_aba4():
                 values=df_via_exp_clean["Exportacao"],
                 hole=0.4,
                 marker=dict(colors=[BLUE, BLUE_LIGHT, GREEN, GRAY_MID]),
-                hovertemplate="<b>%{label}</b><br>Valor: US$ %{value:,.0f}<br>Percentual: %{percent}<extra></extra>"
+                hovertext=exp_hovers,
+                hovertemplate="%{hovertext}<extra></extra>",
+                textinfo="percent+label",
             )])
             fig_via_donut_exp.update_layout(height=350, margin=dict(l=10, r=10, t=20, b=10), legend=dict(orientation="h", yanchor="bottom", y=-0.2))
             show_chart(fig_via_donut_exp)
@@ -962,14 +1177,141 @@ def render_aba4():
                 values=df_via_imp_clean["Importacao"],
                 hole=0.4,
                 marker=dict(colors=[ORANGE, ORANGE_LIGHT, GOLD, GRAY_MID]),
-                hovertemplate="<b>%{label}</b><br>Valor: US$ %{value:,.0f}<br>Percentual: %{percent}<extra></extra>"
+                hovertext=imp_hovers,
+                hovertemplate="%{hovertext}<extra></extra>",
+                textinfo="percent+label",
             )])
             fig_via_donut_imp.update_layout(height=350, margin=dict(l=10, r=10, t=20, b=10), legend=dict(orientation="h", yanchor="bottom", y=-0.2))
             show_chart(fig_via_donut_imp)
 
+        # ══════════════════════════════════════════════════════════════════════════
+        # NOVO: Top 10 Portos e Aeroportos (dados URF)
+        # ══════════════════════════════════════════════════════════════════════════
+        st.markdown("---")
+        st.markdown(
+            "##### 🏗️ Principais Portos e Aeroportos do Comércio Bilateral\n"
+            "Estes são os pontos físicos de onde saem e chegam os produtos comercializados entre Brasil e Países Baixos. "
+            "Um **URF** (Unidade da Receita Federal) é o posto alfandegário por onde o produto passa — pode ser um porto, aeroporto ou posto de fronteira."
+        )
+
+        col_port_exp, col_port_imp = st.columns(2)
+
+        # Top 10 portos por exportação
+        top_portos_exp = df_urf_pres.groupby("NomeURF")["Exportacao"].sum().reset_index()
+        top_portos_exp = top_portos_exp.sort_values("Exportacao", ascending=False).head(10)
+        total_exp_urf = top_portos_exp["Exportacao"].sum()
+        top_portos_exp["Label"] = top_portos_exp["NomeURF"].apply(
+            lambda x: x[:40] + "..." if len(str(x)) > 40 else x
+        )
+
+        # Top 10 portos por importação
+        top_portos_imp = df_urf_pres.groupby("NomeURF")["Importacao"].sum().reset_index()
+        top_portos_imp = top_portos_imp.sort_values("Importacao", ascending=False).head(10)
+        total_imp_urf = top_portos_imp["Importacao"].sum()
+        top_portos_imp["Label"] = top_portos_imp["NomeURF"].apply(
+            lambda x: x[:40] + "..." if len(str(x)) > 40 else x
+        )
+
+        # Hover humanizado para portos de exportação
+        hover_port_exp = []
+        for _, row in top_portos_exp.iterrows():
+            pct = (row["Exportacao"] / total_exp_urf * 100) if total_exp_urf > 0 else 0
+            # Identificar tipo (porto/aeroporto)
+            nome = str(row["NomeURF"]).upper()
+            if "AEROPORTO" in nome:
+                tipo_icon = "✈️ Aeroporto"
+            elif "PORTO" in nome:
+                tipo_icon = "🚢 Porto"
+            else:
+                tipo_icon = "📦 Ponto de embarque"
+            h = (
+                f"<b>{tipo_icon}</b><br>"
+                f"<b>{row['NomeURF']}</b><br>"
+                f"<br>"
+                f"💰 Exportações: <b>{fmt_usd(row['Exportacao'])}</b><br>"
+                f"📊 Participação: <b>{pct:.1f}%</b> do total exportado<br>"
+                f"<br>"
+                f"<i>Ponto de saída de produtos brasileiros<br>com destino aos Países Baixos</i>"
+            )
+            hover_port_exp.append(h)
+
+        # Hover humanizado para portos de importação
+        hover_port_imp = []
+        for _, row in top_portos_imp.iterrows():
+            pct = (row["Importacao"] / total_imp_urf * 100) if total_imp_urf > 0 else 0
+            nome = str(row["NomeURF"]).upper()
+            if "AEROPORTO" in nome:
+                tipo_icon = "✈️ Aeroporto"
+            elif "PORTO" in nome:
+                tipo_icon = "🚢 Porto"
+            else:
+                tipo_icon = "📦 Ponto de entrada"
+            h = (
+                f"<b>{tipo_icon}</b><br>"
+                f"<b>{row['NomeURF']}</b><br>"
+                f"<br>"
+                f"💰 Importações: <b>{fmt_usd(row['Importacao'])}</b><br>"
+                f"📊 Participação: <b>{pct:.1f}%</b> do total importado<br>"
+                f"<br>"
+                f"<i>Ponto de entrada de produtos holandeses<br>no território brasileiro</i>"
+            )
+            hover_port_imp.append(h)
+
+        with col_port_exp:
+            st.markdown("**🚢 Top 10 Portos/Aeroportos — Exportações para Países Baixos**")
+            fig_port_exp = go.Figure()
+            fig_port_exp.add_trace(go.Bar(
+                y=top_portos_exp["Label"], x=top_portos_exp["Exportacao"],
+                orientation="h",
+                marker=dict(
+                    color=top_portos_exp["Exportacao"],
+                    colorscale=[[0, BLUE_LIGHT], [1, BLUE]],
+                ),
+                text=[fmt_usd(v) for v in top_portos_exp["Exportacao"]],
+                textposition="auto", textfont=dict(size=9),
+                hovertext=hover_port_exp,
+                hovertemplate="%{hovertext}<extra></extra>",
+            ))
+            fig_port_exp.update_layout(
+                yaxis=dict(categoryorder="total ascending"),
+                height=400, margin=dict(l=10, t=10, b=10),
+                xaxis=dict(tickformat=",.0f"),
+            )
+            show_chart(fig_port_exp)
+
+        with col_port_imp:
+            st.markdown("**🚢 Top 10 Portos/Aeroportos — Importações dos Países Baixos**")
+            fig_port_imp = go.Figure()
+            fig_port_imp.add_trace(go.Bar(
+                y=top_portos_imp["Label"], x=top_portos_imp["Importacao"],
+                orientation="h",
+                marker=dict(
+                    color=top_portos_imp["Importacao"],
+                    colorscale=[[0, ORANGE_LIGHT], [1, ORANGE]],
+                ),
+                text=[fmt_usd(v) for v in top_portos_imp["Importacao"]],
+                textposition="auto", textfont=dict(size=9),
+                hovertext=hover_port_imp,
+                hovertemplate="%{hovertext}<extra></extra>",
+            ))
+            fig_port_imp.update_layout(
+                yaxis=dict(categoryorder="total ascending"),
+                height=400, margin=dict(l=10, t=10, b=10),
+                xaxis=dict(tickformat=",.0f"),
+            )
+            show_chart(fig_port_imp)
+
         st.markdown("---")
         
         st.markdown("##### ✈️ Perfil de Produtos por Modal de Transporte Principal (Aéreo vs Marítimo)")
+        st.markdown(
+            '<div class="info-box animate-in" style="border-left-color:#F5A623">'
+            '💡 <strong>Por que separar aéreo e marítimo?</strong> '
+            'Produtos pesados e de grande volume (como soja e petróleo) são enviados por <strong>navio</strong>, '
+            'pois o custo do frete é menor. Já produtos de alto valor e peso reduzido (como medicamentos '
+            'e equipamentos de precisão) são enviados por <strong>avião</strong>, pois a velocidade justifica o custo.</div>',
+            unsafe_allow_html=True,
+        )
         
         col_sec_air, col_sec_sea = st.columns(2)
         
@@ -984,7 +1326,7 @@ def render_aba4():
         top_sea_exp["Label"] = top_sea_exp["DescricaoSecao"].apply(lambda x: x[:45] + "..." if len(str(x)) > 45 else x)
 
         with col_sec_air:
-            st.markdown("**Top 5 Seções NCM Importadas via Aérea (Mais Tecnológico)**")
+            st.markdown("**Top 5 Seções NCM Importadas via Aérea (Produtos de Alto Valor)**")
             fig_air_bar = go.Figure()
             fig_air_bar.add_trace(go.Bar(
                 y=top_air_imp["Label"], x=top_air_imp["Importacao"],
@@ -992,7 +1334,7 @@ def render_aba4():
                 marker=dict(color=ORANGE),
                 text=[fmt_usd(v) for v in top_air_imp["Importacao"]],
                 textposition="auto", textfont=dict(size=9),
-                hovertemplate="<b>%{y}</b><br>Importação Aérea: %{text}<extra></extra>",
+                hovertemplate="<b>✈️ Importação via Aérea</b><br><b>%{y}</b><br><br>💰 Valor: %{text}<br><i>Produtos leves e de alto valor unitário,<br>transportados por avião</i><extra></extra>",
             ))
             fig_air_bar.update_layout(
                 yaxis=dict(categoryorder="total ascending"),
@@ -1002,7 +1344,7 @@ def render_aba4():
             show_chart(fig_air_bar)
 
         with col_sec_sea:
-            st.markdown("**Top 5 Seções NCM Exportadas via Marítima (Mais Bulky/Granel)**")
+            st.markdown("**Top 5 Seções NCM Exportadas via Marítima (Grandes Volumes)**")
             fig_sea_bar = go.Figure()
             fig_sea_bar.add_trace(go.Bar(
                 y=top_sea_exp["Label"], x=top_sea_exp["Exportacao"],
@@ -1010,7 +1352,7 @@ def render_aba4():
                 marker=dict(color=BLUE),
                 text=[fmt_usd(v) for v in top_sea_exp["Exportacao"]],
                 textposition="auto", textfont=dict(size=9),
-                hovertemplate="<b>%{y}</b><br>Exportação Marítima: %{text}<extra></extra>",
+                hovertemplate="<b>🚢 Exportação via Marítima</b><br><b>%{y}</b><br><br>💰 Valor: %{text}<br><i>Commodities e produtos em granel,<br>transportados por navios cargueiros</i><extra></extra>",
             ))
             fig_sea_bar.update_layout(
                 yaxis=dict(categoryorder="total ascending"),
@@ -1018,6 +1360,8 @@ def render_aba4():
                 xaxis=dict(tickformat=",.0f"),
             )
             show_chart(fig_sea_bar)
+
+
 
     # ── Texto Analítico ──
     st.markdown("---")
