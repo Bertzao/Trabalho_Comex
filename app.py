@@ -112,7 +112,7 @@ _CHART_WIDTH = "stretch"
 
 
 def show_chart(fig):
-    """Exibe gráfico Plotly com configuração padrão."""
+    """Exibe gráfico Plotly com configuração padrão e fonte dos dados."""
     st.plotly_chart(
         fig,
         width=_CHART_WIDTH,
@@ -122,6 +122,7 @@ def show_chart(fig):
             "modeBarButtonsToRemove": ["lasso2d", "select2d"],
         },
     )
+    st.caption("Fonte dos dados: Comex Stat / MDIC")
 
 
 def render_metric_cards(cols_data: list):
@@ -241,7 +242,7 @@ def render_aba1():
         f'{items_html}</div></body></html>'
     )
 
-    components.html(timeline_html, height=1100, scrolling=False)
+    components.html(timeline_html, height=1400, scrolling=False)
 
     # ── Card de destaque final ──
     st.markdown("<br>", unsafe_allow_html=True)
