@@ -1406,6 +1406,20 @@ def render_aba5():
         unsafe_allow_html=True,
     )
 
+    # ── Metodologia de Projeção ──
+    st.markdown(
+        '<div class="info-box animate-in" style="border-left-color:#AB47BC">'
+        '<div style="font-weight:600;color:#AB47BC;margin-bottom:0.4rem">'
+        '📊 Qual modelo de previsão foi utilizado?</div>'
+        'Em vez de utilizar modelos de "caixa preta" (como IA ou machine learning complexo) que dificultam '
+        'a compreensão, optamos por um <strong>Modelo Determinístico de Cenários com Taxas de Crescimento Compostas (CAGR)</strong>. '
+        '<br><br><strong>Como funciona:</strong> Pegamos o volume real de comércio de 2025 (ponto de partida) e '
+        'projetamos o futuro aplicando taxas de crescimento econômico anuais pré-definidas para as exportações e importações. '
+        'Isso nos permite criar 3 cenários distintos baseados em perspectivas geopolíticas e macroeconômicas reais.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
     # ── Descrição dos Cenários ──
     col1, col2, col3 = st.columns(3)
 
